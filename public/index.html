@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UnBlocker – Browse Freely</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1 class="logo">★ UnBlocker</h1>
+            <p class="subtitle">Browse the web freely · No restrictions</p>
+        </header>
+
+        <div class="url-bar-wrapper" id="urlBarWrapper">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+            </svg>
+            <input type="text" id="urlInput" placeholder="Enter a URL or search…" autocomplete="off" spellcheck="false">
+            <button id="goBtn" onclick="navigateTo()"><span>Go</span></button>
+        </div>
+
+        <div class="quick-actions">
+            <button class="quick-btn" onclick="quickNav('https://en.wikipedia.org')">Wikipedia</button>
+            <button class="quick-btn" onclick="quickNav('https://news.ycombinator.com')">Hacker News</button>
+            <button class="quick-btn" onclick="quickNav('https://old.reddit.com')">Reddit</button>
+            <button class="quick-btn" onclick="quickNav('https://duckduckgo.com')">DuckDuckGo</button>
+            <button class="quick-btn" onclick="quickNav('https://stackoverflow.com')">Stack Overflow</button>
+        </div>
+
+        <div class="status" id="status"></div>
+
+        <div class="result-area" id="resultArea">
+            <div class="result-toolbar">
+                <button class="nav-btn" id="backBtn" onclick="iframeHistoryBack()" title="Back">←</button>
+                <button class="nav-btn" id="fwdBtn" onclick="iframeHistoryForward()" title="Forward">→</button>
+                <button class="nav-btn" id="refreshBtn" onclick="refreshIframe()" title="Refresh">↻</button>
+                <div class="proxy-url-display" id="proxyUrlDisplay" title="Click to copy current URL"></div>
+                <button class="close-btn" onclick="closeResult()">✕</button>
+            </div>
+            <div class="result-iframe-wrapper">
+                <iframe id="proxyIframe" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+                <div class="iframe-placeholder" id="iframePlaceholder">Enter a URL above and press Go</div>
+            </div>
+        </div>
+
+        <div class="info-box">
+            <span>ℹ️</span>
+            <span>
+                <strong>How it works:</strong> This proxy fetches pages server‑side and rewrites all links.
+                You’re browsing through your own Render server – no external service can see what you visit.
+            </span>
+        </div>
+    </div>
+
+    <script>
+        // ===================== CONFIGURATION =====================
+        // When running on your Render server, use the local proxy endpoint.
+        const PROXY_BASE = '/proxy?url=';
+        // ==========================================================
+
+        const urlInput = document.getElementById('urlInput');
+        const goBtn = document.getElementById('goBtn');
+        const statusEl = document.getElementById('status');
+        const resultArea = document.getElementById('resultArea');
+        const proxyIframe = document.getElementById('proxyIframe');
+        const proxyUrlDisplay = document.getElementById('proxyUrlDisplay');
+        const iframePlaceholder = document.getElementById('iframePlaceholder');
+        const backBtn = document.getElementById('backBtn');
+        const fwdBtn = document.getElementById('fwdBtn');
+
+        let currentProxyUrl = '';
+        let iframeHistory = [];
+        let iframeHistoryIndex = -1;
+
+        function normalizeUrl(input) {
+            let trimmed = input.trim();
+            if (!trimmed) return '';
+            if (/^https?:\/\//i.test(trimmed)) return trimmed;
+            if (/^\/\//.test(trimmed)) return 'https:' + trimmed;
+            if (trimmed.includes('.') && !trimmed.includes(' ')) return 'https://' + trimmed;
+            return 'https://duckduckgo.com/?q=' + encodeURIComponent(trimmed);
+        }
+
+        function setStatus(msg, type) {
+            statusEl.textContent = msg;
+            statusEl.className = 'status';
+            if (type) statusEl.classList.add(type);
+            if (type === 'success') setTimeout(() => {
+                if (statusEl.textContent === msg) { statusEl.textContent = ''; statusEl.className = 'status'; }
+            }, 5000);
+        }
+
+        function navigateTo(urlOverride) {
+            const rawInput = urlOverride || urlInput.value;
+            const targetUrl = normalizeUrl(rawInput);
+            if (!targetUrl) { setStatus('Please enter a valid URL.', 'error'); return; }
+
+            goBtn.classList.add('loading');
+            setStatus('Connecting via proxy…', '');
+            resultArea.classList.add('active');
+            iframePlaceholder.style.display = 'flex';
+            proxyIframe.src = 'about:blank';
+
+            const proxiedUrl = PROXY_BASE + encodeURIComponent(targetUrl);
+            currentProxyUrl = targetUrl;
+            proxyUrlDisplay.textContent = targetUrl;
+
+            proxyIframe.src = proxiedUrl;
+            proxyIframe.onload = () => {
+                goBtn.classList.remove('loading');
+                iframePlaceholder.style.display = 'none';
+                setStatus('Loaded: ' + targetUrl, 'success');
+                if (iframeHistoryIndex < iframeHistory.length - 1) {
+                    iframeHistory = iframeHistory.slice(0, iframeHistoryIndex + 1);
+                }
+                iframeHistory.push(targetUrl);
+                iframeHistoryIndex = iframeHistory.length - 1;
+                updateNavButtons();
+            };
+            proxyIframe.onerror = () => {
+                goBtn.classList.remove('loading');
+                iframePlaceholder.style.display = 'flex';
+                iframePlaceholder.textContent = 'Failed to load. Site may be unreachable.';
+                setStatus('Error loading ' + targetUrl, 'error');
+            };
+            urlInput.value = targetUrl;
+        }
+
+        function quickNav(url) { urlInput.value = url; navigateTo(url); }
+
+        function closeResult() {
+            resultArea.classList.remove('active');
+            proxyIframe.src = 'about:blank';
+            currentProxyUrl = '';
+            proxyUrlDisplay.textContent = '';
+            iframePlaceholder.style.display = 'flex';
+            iframePlaceholder.textContent = 'Enter a URL above and press Go';
+            iframeHistory = []; iframeHistoryIndex = -1;
+            updateNavButtons();
+        }
+
+        function iframeHistoryBack() {
+            if (iframeHistoryIndex > 0) { iframeHistoryIndex--; loadHistoryUrl(iframeHistory[iframeHistoryIndex]); }
+        }
+        function iframeHistoryForward() {
+            if (iframeHistoryIndex < iframeHistory.length - 1) { iframeHistoryIndex++; loadHistoryUrl(iframeHistory[iframeHistoryIndex]); }
+        }
+        function loadHistoryUrl(url) {
+            currentProxyUrl = url; proxyUrlDisplay.textContent = url; urlInput.value = url;
+            proxyIframe.src = PROXY_BASE + encodeURIComponent(url); updateNavButtons();
+        }
+        function refreshIframe() {
+            if (currentProxyUrl) proxyIframe.src = PROXY_BASE + encodeURIComponent(currentProxyUrl);
+        }
+        function updateNavButtons() {
+            backBtn.disabled = iframeHistoryIndex <= 0;
+            fwdBtn.disabled = iframeHistoryIndex >= iframeHistory.length - 1;
+        }
+
+        urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); navigateTo(); } });
+        proxyUrlDisplay.addEventListener('click', () => {
+            if (currentProxyUrl) navigator.clipboard.writeText(currentProxyUrl).then(() => setStatus('URL copied!', 'success'));
+        });
+
+        updateNavButtons();
+        urlInput.focus();
+    </script>
+</body>
+</html>
