@@ -9,8 +9,8 @@
 <body>
     <div class="container">
         <header class="header">
-            <h1 class="logo">★ UnBlocker</h1>
-            <p class="subtitle">Browse the web freely · No restrictions</p>
+            <h1 class="logo">IXL</h1>
+            <p class="subtitle">No iframes • Works with YouTube, Facebook, any site</p>
         </header>
 
         <div class="url-bar-wrapper" id="urlBarWrapper">
@@ -28,52 +28,27 @@
             <button class="quick-btn" onclick="quickNav('https://old.reddit.com')">Reddit</button>
             <button class="quick-btn" onclick="quickNav('https://duckduckgo.com')">DuckDuckGo</button>
             <button class="quick-btn" onclick="quickNav('https://stackoverflow.com')">Stack Overflow</button>
+            <button class="quick-btn" onclick="quickNav('https://youtube.com')">YouTube</button>
+            <button class="quick-btn" onclick="quickNav('https://facebook.com')">Facebook</button>
         </div>
 
         <div class="status" id="status"></div>
 
-        <div class="result-area" id="resultArea">
-            <div class="result-toolbar">
-                <button class="nav-btn" id="backBtn" onclick="iframeHistoryBack()" title="Back">←</button>
-                <button class="nav-btn" id="fwdBtn" onclick="iframeHistoryForward()" title="Forward">→</button>
-                <button class="nav-btn" id="refreshBtn" onclick="refreshIframe()" title="Refresh">↻</button>
-                <div class="proxy-url-display" id="proxyUrlDisplay" title="Click to copy current URL"></div>
-                <button class="close-btn" onclick="closeResult()">✕</button>
-            </div>
-            <div class="result-iframe-wrapper">
-                <iframe id="proxyIframe" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
-                <div class="iframe-placeholder" id="iframePlaceholder">Enter a URL above and press Go</div>
-            </div>
-        </div>
-
         <div class="info-box">
             <span>ℹ️</span>
             <span>
-                <strong>How it works:</strong> This proxy fetches pages server‑side and rewrites all links.
-                You’re browsing through your own Render server – no external service can see what you visit.
+                <strong>How it works:</strong> You are redirected to your own proxy server.
+                Every page gets a toolbar at the top – browse endlessly without leaving this domain.
+                All links are rewritten, so websites never know they’re proxied.
             </span>
         </div>
     </div>
 
     <script>
-        // ===================== CONFIGURATION =====================
-        // When running on your Render server, use the local proxy endpoint.
         const PROXY_BASE = '/proxy?url=';
-        // ==========================================================
-
         const urlInput = document.getElementById('urlInput');
         const goBtn = document.getElementById('goBtn');
         const statusEl = document.getElementById('status');
-        const resultArea = document.getElementById('resultArea');
-        const proxyIframe = document.getElementById('proxyIframe');
-        const proxyUrlDisplay = document.getElementById('proxyUrlDisplay');
-        const iframePlaceholder = document.getElementById('iframePlaceholder');
-        const backBtn = document.getElementById('backBtn');
-        const fwdBtn = document.getElementById('fwdBtn');
-
-        let currentProxyUrl = '';
-        let iframeHistory = [];
-        let iframeHistoryIndex = -1;
 
         function normalizeUrl(input) {
             let trimmed = input.trim();
@@ -84,88 +59,28 @@
             return 'https://duckduckgo.com/?q=' + encodeURIComponent(trimmed);
         }
 
-        function setStatus(msg, type) {
-            statusEl.textContent = msg;
-            statusEl.className = 'status';
-            if (type) statusEl.classList.add(type);
-            if (type === 'success') setTimeout(() => {
-                if (statusEl.textContent === msg) { statusEl.textContent = ''; statusEl.className = 'status'; }
-            }, 5000);
-        }
-
         function navigateTo(urlOverride) {
             const rawInput = urlOverride || urlInput.value;
             const targetUrl = normalizeUrl(rawInput);
-            if (!targetUrl) { setStatus('Please enter a valid URL.', 'error'); return; }
-
-            goBtn.classList.add('loading');
-            setStatus('Connecting via proxy…', '');
-            resultArea.classList.add('active');
-            iframePlaceholder.style.display = 'flex';
-            proxyIframe.src = 'about:blank';
-
-            const proxiedUrl = PROXY_BASE + encodeURIComponent(targetUrl);
-            currentProxyUrl = targetUrl;
-            proxyUrlDisplay.textContent = targetUrl;
-
-            proxyIframe.src = proxiedUrl;
-            proxyIframe.onload = () => {
-                goBtn.classList.remove('loading');
-                iframePlaceholder.style.display = 'none';
-                setStatus('Loaded: ' + targetUrl, 'success');
-                if (iframeHistoryIndex < iframeHistory.length - 1) {
-                    iframeHistory = iframeHistory.slice(0, iframeHistoryIndex + 1);
-                }
-                iframeHistory.push(targetUrl);
-                iframeHistoryIndex = iframeHistory.length - 1;
-                updateNavButtons();
-            };
-            proxyIframe.onerror = () => {
-                goBtn.classList.remove('loading');
-                iframePlaceholder.style.display = 'flex';
-                iframePlaceholder.textContent = 'Failed to load. Site may be unreachable.';
-                setStatus('Error loading ' + targetUrl, 'error');
-            };
-            urlInput.value = targetUrl;
+            if (!targetUrl) {
+                statusEl.textContent = 'Please enter a valid URL.';
+                statusEl.className = 'status error';
+                return;
+            }
+            statusEl.textContent = 'Redirecting…';
+            statusEl.className = 'status';
+            // Redirect the whole page to the proxy – no iframe at all
+            window.location.href = PROXY_BASE + encodeURIComponent(targetUrl);
         }
 
-        function quickNav(url) { urlInput.value = url; navigateTo(url); }
-
-        function closeResult() {
-            resultArea.classList.remove('active');
-            proxyIframe.src = 'about:blank';
-            currentProxyUrl = '';
-            proxyUrlDisplay.textContent = '';
-            iframePlaceholder.style.display = 'flex';
-            iframePlaceholder.textContent = 'Enter a URL above and press Go';
-            iframeHistory = []; iframeHistoryIndex = -1;
-            updateNavButtons();
+        function quickNav(url) {
+            urlInput.value = url;
+            navigateTo(url);
         }
 
-        function iframeHistoryBack() {
-            if (iframeHistoryIndex > 0) { iframeHistoryIndex--; loadHistoryUrl(iframeHistory[iframeHistoryIndex]); }
-        }
-        function iframeHistoryForward() {
-            if (iframeHistoryIndex < iframeHistory.length - 1) { iframeHistoryIndex++; loadHistoryUrl(iframeHistory[iframeHistoryIndex]); }
-        }
-        function loadHistoryUrl(url) {
-            currentProxyUrl = url; proxyUrlDisplay.textContent = url; urlInput.value = url;
-            proxyIframe.src = PROXY_BASE + encodeURIComponent(url); updateNavButtons();
-        }
-        function refreshIframe() {
-            if (currentProxyUrl) proxyIframe.src = PROXY_BASE + encodeURIComponent(currentProxyUrl);
-        }
-        function updateNavButtons() {
-            backBtn.disabled = iframeHistoryIndex <= 0;
-            fwdBtn.disabled = iframeHistoryIndex >= iframeHistory.length - 1;
-        }
-
-        urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); navigateTo(); } });
-        proxyUrlDisplay.addEventListener('click', () => {
-            if (currentProxyUrl) navigator.clipboard.writeText(currentProxyUrl).then(() => setStatus('URL copied!', 'success'));
+        urlInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); navigateTo(); }
         });
-
-        updateNavButtons();
         urlInput.focus();
     </script>
 </body>
