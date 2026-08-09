@@ -3,14 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UnBlocker – Browse Freely</title>
+    <title>IXL</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Favicon for the main landing page -->
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
 </head>
 <body>
     <div class="container">
         <header class="header">
-            <h1 class="logo">IXL</h1>
-            <p class="subtitle">No iframes • Works with YouTube, Facebook, any site</p>
+            <h1 class="logo">★ UnBlocker</h1>
+            <p class="subtitle">Opens in a new tab · Looks like IXL · about:blank URL</p>
         </header>
 
         <div class="url-bar-wrapper" id="urlBarWrapper">
@@ -37,9 +39,8 @@
         <div class="info-box">
             <span>ℹ️</span>
             <span>
-                <strong>How it works:</strong> You are redirected to your own proxy server.
-                Every page gets a toolbar at the top – browse endlessly without leaving this domain.
-                All links are rewritten, so websites never know they’re proxied.
+                <strong>New! Stealth mode:</strong> When you press Go, a new tab opens with <em>about:blank</em> in the address bar,
+                titled <strong>IXL</strong> and using a custom favicon. The site loads seamlessly inside it – invisible to network monitors.
             </span>
         </div>
     </div>
@@ -49,6 +50,9 @@
         const urlInput = document.getElementById('urlInput');
         const goBtn = document.getElementById('goBtn');
         const statusEl = document.getElementById('status');
+
+        // Base64 encoded favicon (16x16 globe) – replace with your own if you like
+        const FAVICON_DATA = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAbwAAAG8B8aLcQwAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAEESURBVDiNpZMxTsNAEEX/rNeOAwUlHVdA4gJcAokrUHAFLoDEDbgAElIkCu6AhOIuCMk5sLO7M7Qbs2uv7TiKkEaa3dF8/dk/MytEVRFCLDHGXRhzAKwArFQVEbETkR2AQ0TcV9U3Y+ybqn7/l06MMQ9N07w55z6bpnk0xqTW2sYY0/R9fx9CWGut3/8kCCFuROQcwBsivgghTr+E1nXdubV2HREPjTF3WuuLruveQggXWusjRHwwxjylaXrxD0hr/SYi76XWiMg75/EFNLBt2/qXgrqunWXZ0BgT11r/GmQA7CNirLVuKaW/09FQAQAQkRnAp1KKSqlMJgCYEZEAgIhIKb0DfpdSpoPBgqpqUko1y2y2JyI3/X4//wp/X2/JeWtQFqMAAAAASUVORK5CYII=';
 
         function normalizeUrl(input) {
             let trimmed = input.trim();
@@ -67,10 +71,74 @@
                 statusEl.className = 'status error';
                 return;
             }
-            statusEl.textContent = 'Redirecting…';
+
+            statusEl.textContent = 'Opening about:blank tab…';
             statusEl.className = 'status';
-            // Redirect the whole page to the proxy – no iframe at all
-            window.location.href = PROXY_BASE + encodeURIComponent(targetUrl);
+
+            const proxyUrl = PROXY_BASE + encodeURIComponent(targetUrl);
+
+            // Open a new tab with about:blank
+            const win = window.open('about:blank', '_blank');
+            if (!win) {
+                statusEl.textContent = 'Popup blocked! Allow popups for this site.';
+                statusEl.className = 'status error';
+                return;
+            }
+
+            // Write the loader + injector page into the new tab
+            win.document.write(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>IXL</title>
+                    <link rel="icon" type="image/png" href="${FAVICON_DATA}">
+                    <style>
+                        body { margin: 0; background: #0d1117; color: #e6edf3; 
+                               font-family: 'Inter', system-ui, sans-serif;
+                               display: flex; align-items: center; justify-content: center;
+                               height: 100vh; flex-direction: column; }
+                        .loader { font-size: 1.2rem; opacity: 0.8; }
+                    </style>
+                </head>
+                <body>
+                    <div class="loader">Loading IXL…</div>
+                    <script>
+                        (async function() {
+                            const proxyUrl = ${JSON.stringify(proxyUrl)};
+                            try {
+                                const res = await fetch(proxyUrl);
+                                if (!res.ok) throw new Error('Failed to load');
+                                let html = await res.text();
+
+                                // Remove existing title and favicon to inject our own
+                                html = html.replace(/<title[^>]*>[\\s\\S]*?<\\/title>/gi, '');
+                                html = html.replace(/<link[^>]*rel=["'](?:shortcut )?icon["'][^>]*>/gi, '');
+
+                                // Prepend our custom title and favicon
+                                const customHead = '<title>IXL</title><link rel="icon" type="image/png" href="${FAVICON_DATA}">';
+                                html = html.replace(/<head[^>]*>/i, match => match + customHead);
+                                if (!/<head/i.test(html)) {
+                                    html = '<head>' + customHead + '</head>' + html;
+                                }
+
+                                // Write the modified page – URL stays about:blank
+                                document.open();
+                                document.write(html);
+                                document.close();
+                            } catch (err) {
+                                document.body.innerHTML = '<div class="loader">Error loading page. Try again.</div>';
+                            }
+                        })();
+                    <\/script>
+                </body>
+                </html>
+            `);
+            win.document.close();
+
+            // Focus the new tab
+            win.focus();
+            statusEl.textContent = 'Tab opened – browse freely.';
+            statusEl.className = 'status success';
         }
 
         function quickNav(url) {
