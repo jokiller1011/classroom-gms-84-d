@@ -1,0 +1,12 @@
+{
+  "name": "web-unblocker",
+  "version": "1.0.0",
+  "description": "A full‑featured web proxy that bypasses network restrictions",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
