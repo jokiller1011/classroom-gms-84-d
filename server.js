@@ -7,10 +7,9 @@ const { URL } = require('url');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Serve static landing page
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.raw({ type: '*/*', limit: '50mb' }));
 
-// Proxy endpoint – fetches and rewrites any page
 app.all('/proxy', async (req, res) => {
   try {
     const targetUrl = req.query.url;
@@ -29,7 +28,6 @@ app.all('/proxy', async (req, res) => {
       headers: { ...req.headers },
     };
 
-    // Remove hop‑by‑hop headers
     ['host','connection','keep-alive','transfer-encoding','proxy-connection','proxy-authorization','upgrade']
       .forEach(h => delete options.headers[h]);
     options.headers['host'] = parsed.hostname;
@@ -39,8 +37,6 @@ app.all('/proxy', async (req, res) => {
       const contentType = proxyRes.headers['content-type'] || '';
       const isHtml = contentType.includes('text/html');
       const responseHeaders = { ...proxyRes.headers };
-
-      // Remove headers that prevent framing or break rewriting
       ['content-security-policy','x-frame-options','content-encoding','transfer-encoding']
         .forEach(h => delete responseHeaders[h]);
 
@@ -76,9 +72,129 @@ function rewriteHtml(html, baseUrl) {
   const proxyBase = '/proxy?url=';
   const baseUrlStr = baseUrl.origin + baseUrl.pathname.replace(/\/[^/]*$/, '/');
 
-  // Browser‑like toolbar injected at the top of every page
+  // ---- Navigation lock script (injected BEFORE any other script) ----
+  const lockScript = `
+<script>
+(function() {
+  var proxyBase = '${proxyBase}';
+  function fixUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+    if (url.startsWith('javascript:') || url.startsWith('data:') || url.startsWith('blob:') ||
+        url.startsWith('mailto:') || url.startsWith('#')) return url;
+    if (url.startsWith(proxyBase)) return url; // already proxied
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return proxyBase + encodeURIComponent(url);
+    }
+    // relative URL resolution happens later, but we'll let the native handler deal after
+    return url;
+  }
+
+  // Override window.location
+  var originalLocation = window.location;
+  var locationProxy = new Proxy(originalLocation, {
+    set: function(obj, prop, value) {
+      if (prop === 'href') {
+        var fixed = fixUrl(value);
+        if (fixed && fixed !== value) {
+          console.log('[UnBlocker] Redirecting to', fixed);
+          originalLocation.href = fixed;
+          return true;
+        }
+      }
+      return Reflect.set(obj, prop, value);
+    },
+    get: function(obj, prop) {
+      if (prop === 'assign' || prop === 'replace') {
+        return function(url) {
+          var fixed = fixUrl(url);
+          return obj[prop](fixed);
+        };
+      }
+      return Reflect.get(obj, prop);
+    }
+  });
+  Object.defineProperty(window, 'location', {
+    get: function() { return locationProxy; },
+    set: function(value) { locationProxy.href = value; }
+  });
+
+  // Override document.location
+  Object.defineProperty(document, 'location', {
+    get: function() { return locationProxy; },
+    set: function(value) { locationProxy.href = value; }
+  });
+
+  // Override window.open
+  var originalOpen = window.open;
+  window.open = function(url, target, features) {
+    var fixed = fixUrl(url);
+    return originalOpen.call(window, fixed, target, features);
+  };
+
+  // Intercept all clicks (even dynamically added elements)
+  document.addEventListener('click', function(e) {
+    var target = e.target;
+    while (target && target.nodeName !== 'A') target = target.parentNode;
+    if (target && target.href) {
+      var href = target.getAttribute('href');
+      if (href && !href.startsWith('javascript:') && !href.startsWith('#') && !href.startsWith('mailto:')) {
+        var fixed = fixUrl(href);
+        if (fixed && fixed !== href) {
+          e.preventDefault();
+          window.location.href = fixed;
+        }
+      }
+    }
+  }, true);
+
+  // Intercept form submissions
+  document.addEventListener('submit', function(e) {
+    var form = e.target;
+    if (form.action && typeof form.action === 'string') {
+      var fixed = fixUrl(form.action);
+      if (fixed && fixed !== form.action) {
+        e.preventDefault();
+        form.action = fixed;
+        form.submit();
+      }
+    }
+  }, true);
+
+  // Override history.pushState / replaceState to keep URLs proxified
+  var originalPushState = history.pushState;
+  var originalReplaceState = history.replaceState;
+  history.pushState = function(state, title, url) {
+    if (url) url = fixUrl(url);
+    return originalPushState.call(this, state, title, url);
+  };
+  history.replaceState = function(state, title, url) {
+    if (url) url = fixUrl(url);
+    return originalReplaceState.call(this, state, title, url);
+  };
+
+  // Rewrite <meta http-equiv="refresh"> content attribute
+  var metaRefresh = document.querySelector('meta[http-equiv="refresh"]');
+  if (metaRefresh) {
+    var content = metaRefresh.getAttribute('content');
+    if (content) {
+      var parts = content.split(';');
+      var urlPart = parts.find(p => p.trim().toLowerCase().startsWith('url='));
+      if (urlPart) {
+        var url = urlPart.split('=')[1];
+        var fixed = fixUrl(url);
+        if (fixed) {
+          metaRefresh.setAttribute('content', content.replace(url, fixed));
+        }
+      }
+    }
+  }
+})();
+</script>
+`;
+  // -------------------------------------------------------------
+
+  // Browser‑like toolbar (injected at the very top)
   const navBar = `
-<!-- UnBlocker Toolbar -->
 <style>
   #__ub_toolbar__ {
     position: fixed; top: 0; left: 0; right: 0; z-index: 999999;
@@ -113,21 +229,27 @@ function rewriteHtml(html, baseUrl) {
   <a href="/" class="ub_home" title="Home">⌂</a>
   <button class="ub_refresh" onclick="location.reload()" title="Refresh">↻</button>
   <input id="__ub_url__" value="${escapeHtml(baseUrl.href)}" 
-         onkeydown="if(event.key==='Enter'){navigate(this.value)}">
-  <button onclick="navigate(document.getElementById('__ub_url__').value)">Go</button>
+         onkeydown="if(event.key==='Enter'){__ub_navigate(this.value)}">
+  <button onclick="__ub_navigate(document.getElementById('__ub_url__').value)">Go</button>
 </div>
 <script>
-  function navigate(url) {
+  function __ub_navigate(url) {
     if (!url.startsWith('http')) url = 'https://' + url;
     window.location.href = '${proxyBase}' + encodeURIComponent(url);
   }
 </script>
 `;
 
-  let modified = html.replace(/<body[^>]*>/i, match => match + navBar);
+  let modified = html;
+  // Inject lock script as early as possible (after <head> or before any script)
+  modified = modified.replace(/<head[^>]*>/i, match => match + lockScript);
+  if (modified === html) modified = lockScript + modified; // fallback
+
+  // Inject toolbar after <body>
+  modified = modified.replace(/<body[^>]*>/i, match => match + navBar);
   if (modified === html) modified = navBar + modified;
 
-  // Rewrite all resource attributes to pass through the proxy
+  // Rewrite all resource attributes (href, src, action, srcset, etc.)
   const rewrites = [
     { tag: 'a', attr: 'href' }, { tag: 'link', attr: 'href' }, { tag: 'img', attr: 'src' },
     { tag: 'script', attr: 'src' }, { tag: 'iframe', attr: 'src' }, { tag: 'form', attr: 'action' },
